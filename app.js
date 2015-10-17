@@ -41,6 +41,7 @@ var proxyPort = 9123;
 var maxFileSize = 20 * 1024 * 1024; // 20 MB
 var uploadedUrl = 'http://localhost:' + proxyPort + '/';
 var ownerUrl = 'http://github.com/blha303';
+var browseUrl = 'http://browse.blha303.biz'; // https://github.com/blha303/puushproxy-browse
 var uploadPath = 'upload/';
 var passwordSalt = '';
 var registerEnabled = true;
@@ -403,7 +404,7 @@ http.createServer(function (request, response)
 	
 	if (path == "/login/go/")
 	{
-		response.writeHead(302, { 'Location': 'http://browse.blha303.biz/?k=' + uri.query.k });
+		response.writeHead(302, { 'Location': browseUrl + '/?k=' + uri.query.k });
 		response.end();
 		return;
 	}
