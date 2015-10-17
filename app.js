@@ -17,16 +17,34 @@ var mongoose = require('mongoose');
 var crypto = require('crypto');
 var path = require('path');
 var mime = require('mime');
+var marked = require('marked');
+var zlib = require("zlib");
+
+var apimap = require("./apimap.json");
+var redirurl = require("./redirecturl.json");
+
+fs.readFile('./github-gist.css', function read(err, data) {
+	if (err) {
+	  throw err;
+	}
+	marked.setOptions({
+	  highlight: function (code) {
+	    return data + require('highlight.js').highlightAuto(code).value;
+	  }
+	});
+});
 
 mongoose.connect('mongodb://localhost/puush');
 
 // Configuration
 var proxyPort = 9123;
-var maxFileSize = 5 * 1024 * 1024; // 5 MB
+var maxFileSize = 20 * 1024 * 1024; // 20 MB
 var uploadedUrl = 'http://localhost:' + proxyPort + '/';
+var ownerUrl = 'http://github.com/blha303';
 var uploadPath = 'upload/';
-var passwordSalt = '';
-var registerEnabled = false;
+var passwordSalt = 'this is a salt!';
+var registerEnabled = true;
+var xsendfile = false; // change to true if you set up X-SendFile
 
 var Schema = mongoose.Schema;
 var UserSchema = new Schema(
@@ -82,7 +100,7 @@ function safeFilename(filename)
 function customPuush(req, res)
 {
 	var form = new formidable.IncomingForm();
-	form.maxFieldsSize = maxFileSize; // 5mb
+	form.maxFieldsSize = maxFileSize; // 20mb
 
 	form.on('error', function (err)
 	{
@@ -107,9 +125,9 @@ function customPuush(req, res)
 			{
 				var f = files[i];
 				
-				if (f.size > maxFileSize) // second 5mb check
+				if (f.size > maxFileSize) // second 20mb check
 				{
-					console.log('exceed 5mb');
+					console.log('exceed 20mb');
 					continue;
 				}
 				++success;
@@ -167,7 +185,7 @@ function customPuush(req, res)
 						user.quotaUsed += file.size;
 						user.save();
 						
-						res.end('0,' + uploadedUrl + s + ext + ',133337,12345');
+						res.end('0,' + getUploadedUrl(apiKey) + s + ext + ',133337,0');
 					}).bind(this, fx, shortname));
 				}
 				
@@ -202,6 +220,23 @@ function customPuush(req, res)
 			}
 		});
 	});
+}
+
+function getUploadedUrl(apikey)
+{
+	if (apikey in apimap) {
+		return apimap[apikey];
+	}
+	return uploadedUrl;
+}
+
+function getRedirectURL(host)
+{
+	host = host.toLowerCase();
+	if (host in redirurl) {
+		return redirurl[host];
+	}
+	return ownerUrl;
 }
 
 function handleRegister(req, res)
@@ -284,7 +319,7 @@ function handleRegister(req, res)
 http.createServer(function (request, response)
 {
 	var method = request.method;
-	var uri = url.parse(request.url);
+	var uri = url.parse(request.url, true);
 	var path = uri.pathname;
 	
 	var pathparts = (path[0] == '/' ? path.substr(1) : path).split('/');
@@ -299,6 +334,7 @@ http.createServer(function (request, response)
 		else if (pathparts[0].split(".")[0].length == 4)
 		{
 			var short = pathparts[0].split(".")[0];
+			var raw = pathparts[0].indexOf(".raw");
 			
 			FileModel.findOne({ shortname: short }, function (err, doc)
 			{
@@ -312,24 +348,50 @@ http.createServer(function (request, response)
 					fs.readFile(uploadPath + doc.name, 'binary', function (err, file)
 					{
 						if (err)
-						{        
+						{
 							response.writeHead(500, { 'Content-Type': 'text/html' });
 							response.end('<h1>500 Internal Server Error</h1>');
 							return;
 						}
 						
 						var mimetype = mime.lookup(doc.name);
-						var headers = { 'Content-Type': mimetype };
+						var headers = { 'Content-Type': mimetype};
 
-						var needle = "application/";
-						if (mimetype.length >= needle.length && mimetype.substr(0, needle.length) == needle)
+						if (mimetype == "text/x-markdown" && doc.name.length >= ".md".length && doc.name.substr(doc.name.length - 3, doc.name.length) == ".md" && raw == -1)
 						{
-							headers['Content-Disposition'] = 'attachment; filename=' + doc.name
+							headers["Content-Type"] = "text/html";
+							response.writeHead(200, headers);
+							response.write(marked(file));
+							response.end();
+						} else if (doc.name.length >= ".txt.gz".length && doc.name.indexOf(".txt") > -1 && doc.name.indexOf(".gz") > -1 && request.headers['accept-encoding'].indexOf('gzip') > -1) {
+							console.log(request.headers);
+							headers["Content-Type"] = "text/plain";
+							headers["Content-Encoding"] = "gzip";
+							headers['Content-Disposition'] = 'inline; filename=' + doc.name.replace(/\.gz/g, "");
+							response.writeHead(200, headers);
+							response.write(file, 'binary');
+							response.end();
+//						} else if (mimetype.length >= "application/".length && mimetype.substr(0, "application/".length) == "application/") {
+//							headers['Content-Disposition'] = 'attachment; filename=' + doc.name;
+//							if (xsendfile) {
+//								headers['X-Sendfile'] = __dirname + '/' + uploadPath + doc.name;
+//							}
+//							response.writeHead(200, headers);
+//							if (!xsendfile) {
+//								response.write(file, 'binary');
+//							}
+//							response.end();
+						} else {
+							headers['Content-Disposition'] = 'inline; filename=' + doc.name;
+							if (xsendfile) {
+								headers['X-Sendfile'] = __dirname + '/' + uploadPath + doc.name;
+							}
+							response.writeHead(200, headers);
+							if (!xsendfile) {
+								response.write(file, 'binary');
+							}
+							response.end();
 						}
-
-						response.writeHead(200, headers);
-						response.write(file, 'binary');
-						response.end();
 					});
 				}
 			});
@@ -339,20 +401,22 @@ http.createServer(function (request, response)
 	
 	response.writeHead(200, { 'Content-Type': 'text/plain' });
 	
-	if (path == '/dl/puush-win.txt')
+	if (path == "/login/go/")
 	{
-		response.end('81');
+		response.writeHead(302, { 'Location': 'http://browse.blha303.biz/?k=' + uri.query.k });
+		response.end();
 		return;
 	}
-	
+
 	if (pathparts.length < 2 || pathparts[0] != 'api')
 	{
-		response.end('This is a puush proxy service.');
+		response.writeHead(200, { 'Content-Type': 'text/html' });
+		response.end("<meta http-equiv='refresh' content='3;url=" + getRedirectURL(request.headers["x-forwarded-host"]) + "'>This is a puush proxy site. Redirecting to owner main page in 3 seconds...");
 		return;
 	}
 	
 	var apiact = pathparts[1];
-	
+	response.writeHead(200, {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE', 'Access-Control-Allow-Headers': 'X-Requested-With', 'Access-Control-Allow-Headers': 'Content-Type'});
 	if (apiact == 'auth')
 	{
 		var buf = '';
@@ -399,7 +463,43 @@ http.createServer(function (request, response)
 	}
 	else if (apiact == 'hist')
 	{
-		response.end('0\n');
+		function format_date(d) {
+			return d.toISOString().replace("T", " ").split(".")[0];
+		}
+		var buf = '';
+		request.on('data', function (chunk)
+		{
+			buf += chunk.toString();
+		});
+		request.on('end', function ()
+		{
+			var query = querystring.parse(buf);
+			var apikey = query['k'];
+			if (!apikey)
+			{
+				response.end("0\n");
+				return;
+			}
+			var cond = { apiKey: String(query['k']) };
+			UserModel.findOne(cond, function(err, doc) {
+				var user = doc["_id"];
+				FileModel.find({ owner: String(user) }).limit(9).sort('_id', -1).exec(function(err, result) {
+					if (result == null || err)
+					{
+						response.end('0\n');
+						return;
+					}
+					var output = "0\n";
+					result.map( function(item) {
+						out = "34563," + format_date(item["ts"]) + "," + getUploadedUrl(apikey) + item["shortname"] + "," + item["name"] + ",1337,0\n";
+						output += out;
+					});
+					response.end(output);
+					return;
+				});
+			});
+		});
 		return;
 	}
 }).listen(proxyPort);
+
