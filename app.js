@@ -29,7 +29,7 @@ fs.readFile('./github-gist.css', function read(err, data) {
 	}
 	marked.setOptions({
 	  highlight: function (code) {
-	    return data + require('highlight.js').highlightAuto(code).value;
+	    return "<style>" + data + "</style>"+ require('highlight.js').highlightAuto(code).value;
 	  }
 	});
 });
@@ -42,7 +42,7 @@ var maxFileSize = 20 * 1024 * 1024; // 20 MB
 var uploadedUrl = 'http://localhost:' + proxyPort + '/';
 var ownerUrl = 'http://github.com/blha303';
 var uploadPath = 'upload/';
-var passwordSalt = 'this is a salt!';
+var passwordSalt = '';
 var registerEnabled = true;
 var xsendfile = false; // change to true if you set up X-SendFile
 
