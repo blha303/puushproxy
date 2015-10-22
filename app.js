@@ -364,9 +364,13 @@ http.createServer(function (request, response)
 							response.writeHead(200, headers);
 							response.write(marked(file));
 							response.end();
-						} else if (doc.name.length >= ".txt.gz".length && doc.name.indexOf(".txt") > -1 && doc.name.indexOf(".gz") > -1 && request.headers['accept-encoding'].indexOf('gzip') > -1) {
+						} else if (doc.name.length >= ".gz".length && doc.name.indexOf(".gz") > -1 && request.headers['accept-encoding'].indexOf('gzip') > -1) {
 							console.log(request.headers);
-							headers["Content-Type"] = "text/plain";
+							if (doc.name.length >= ".txt.gz".length && doc.name.indexOf(".txt") > -1) {
+								headers["Content-Type"] = "text/plain";
+							} else {
+								headers["Content-Type"] = "application/octet-stream";
+							}
 							headers["Content-Encoding"] = "gzip";
 							headers['Content-Disposition'] = 'inline; filename=' + doc.name.replace(/\.gz/g, "");
 							response.writeHead(200, headers);
